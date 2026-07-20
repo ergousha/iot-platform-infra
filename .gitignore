@@ -23,3 +23,6 @@ override.tf.json
 
 # Lock files
 .terraform.tfstate.lock.info
+
+# Local AWS credentials
+aws-env.sh

@@ -26,3 +26,6 @@ override.tf.json
 
 # Local AWS credentials
 aws-env.sh
+
+# Compiled Go binaries
+**/bootstrap

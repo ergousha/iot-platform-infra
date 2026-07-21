@@ -1,10 +1,23 @@
 # ---------------------------------------------------------------------------
 # Pre-provisioning hook Lambda (serverless, on-demand).
 # ---------------------------------------------------------------------------
+resource "terraform_data" "build_hook" {
+  triggers_replace = {
+    source_hash = sha256(join("", [
+      filesha256("${path.module}/lambda/pre_provisioning_hook/main.go"),
+    ]))
+  }
+
+  provisioner "local-exec" {
+    command = "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags='-s -w' -o ${path.module}/lambda/pre_provisioning_hook/bootstrap ${path.module}/lambda/pre_provisioning_hook/main.go"
+  }
+}
+
 data "archive_file" "hook_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/lambda/pre_provisioning_hook"
+  source_file = "${path.module}/lambda/pre_provisioning_hook/bootstrap"
   output_path = "${path.module}/.build/pre_provisioning_hook.zip"
+  depends_on  = [terraform_data.build_hook]
 }
 
 resource "aws_cloudwatch_log_group" "hook" {
@@ -15,8 +28,8 @@ resource "aws_cloudwatch_log_group" "hook" {
 resource "aws_lambda_function" "pre_provisioning_hook" {
   function_name    = "${var.project_name}-pre-provisioning-hook"
   role             = aws_iam_role.hook.arn
-  runtime          = "python3.12"
-  handler          = "index.handler"
+  runtime          = "provided.al2023"
+  handler          = "bootstrap"
   filename         = data.archive_file.hook_zip.output_path
   source_code_hash = data.archive_file.hook_zip.output_base64sha256
 

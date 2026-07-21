@@ -141,7 +141,7 @@ sequenceDiagram
 ### Prerequisites
 *   Terraform `>= 1.5.0`
 *   AWS CLI `v2`
-*   Python `3.12` (required to archive Lambda packages during Terraform runs)
+*   Go `>= 1.22` (required to compile Go Lambda binaries during Terraform runs)
 
 ### AWS Authentication Configuration
 Configure your local environment with credentials for your target AWS account:
@@ -164,6 +164,18 @@ aws sts get-caller-identity
     ```sh
     terraform apply
     ```
+
+### Local Development & VS Code Tasks
+To simplify developer workflows, this repository is configured with VS Code Tasks (defined in `.vscode/tasks.json`). You can execute them by opening the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`), typing `Tasks: Run Task`, and selecting one of the following:
+
+*   **Go: Build Lambdas**: Compiles both Go Lambda functions for Linux/AMD64.
+*   **Go: Run Unit Tests**: Runs all unit tests with verbose logging (`go test -v ./...`).
+*   **Go: Format Code**: Formats Go code styling (`gofmt -s -w .`).
+*   **Go: Lint Code**: Audits Go code quality using `golangci-lint`.
+*   **Go: Clean Binaries**: Cleans up local builds and temporary ZIP archives.
+*   **Terraform: Format Files**: Rewrites Terraform files into canonical format (`terraform fmt`).
+*   **Terraform: Validate**: Initializes modules and validates Terraform structure (`terraform init -backend=false && terraform validate`).
+*   **Terraform: Lint (TFLint)**: Audits Terraform configurations using `tflint`.
 
 ### SSM Parameter Store Integration
 Terraform automatically publishes the deployment outputs to the AWS Systems Manager (SSM) Parameter Store. You can read them directly using the AWS CLI or build tools, eliminating the need to parse Terraform state files manually:

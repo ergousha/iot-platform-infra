@@ -1,0 +1,61 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Go: Build Lambdas",
+      "type": "shell",
+      "command": "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags=\"-s -w\" -o lambda/pre_provisioning_hook/bootstrap ./lambda/pre_provisioning_hook && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags=\"-s -w\" -o lambda/ota_trigger/bootstrap ./lambda/ota_trigger",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$go"]
+    },
+    {
+      "label": "Go: Run Unit Tests",
+      "type": "shell",
+      "command": "go test -v ./...",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": ["$go"]
+    },
+    {
+      "label": "Go: Format Code",
+      "type": "shell",
+      "command": "gofmt -s -w .",
+      "problemMatcher": []
+    },
+    {
+      "label": "Go: Lint Code",
+      "type": "shell",
+      "command": "golangci-lint run ./...",
+      "problemMatcher": []
+    },
+    {
+      "label": "Go: Clean Binaries",
+      "type": "shell",
+      "command": "rm -f lambda/pre_provisioning_hook/bootstrap lambda/ota_trigger/bootstrap && rm -rf .build/*.zip",
+      "problemMatcher": []
+    },
+    {
+      "label": "Terraform: Format Files",
+      "type": "shell",
+      "command": "terraform fmt",
+      "problemMatcher": []
+    },
+    {
+      "label": "Terraform: Validate",
+      "type": "shell",
+      "command": "terraform init -backend=false && terraform validate",
+      "problemMatcher": []
+    },
+    {
+      "label": "Terraform: Lint (TFLint)",
+      "type": "shell",
+      "command": "tflint --init && tflint -f compact",
+      "problemMatcher": []
+    }
+  ]
+}

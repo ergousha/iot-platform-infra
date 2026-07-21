@@ -1,10 +1,23 @@
 # ---------------------------------------------------------------------------
 # OTA Trigger Lambda (serverless, event-driven).
 # ---------------------------------------------------------------------------
+resource "terraform_data" "build_ota_trigger" {
+  triggers_replace = {
+    source_hash = sha256(join("", [
+      filesha256("${path.module}/lambda/ota_trigger/main.go"),
+    ]))
+  }
+
+  provisioner "local-exec" {
+    command = "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags='-s -w' -o ${path.module}/lambda/ota_trigger/bootstrap ${path.module}/lambda/ota_trigger/main.go"
+  }
+}
+
 data "archive_file" "ota_trigger_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/lambda/ota_trigger"
+  source_file = "${path.module}/lambda/ota_trigger/bootstrap"
   output_path = "${path.module}/.build/ota_trigger.zip"
+  depends_on  = [terraform_data.build_ota_trigger]
 }
 
 resource "aws_cloudwatch_log_group" "ota_trigger" {
@@ -62,8 +75,8 @@ resource "aws_iam_role_policy" "ota_trigger" {
 resource "aws_lambda_function" "ota_trigger" {
   function_name    = "${var.project_name}-ota-trigger"
   role             = aws_iam_role.ota_trigger.arn
-  runtime          = "python3.12"
-  handler          = "index.handler"
+  runtime          = "provided.al2023"
+  handler          = "bootstrap"
   filename         = data.archive_file.ota_trigger_zip.output_path
   source_code_hash = data.archive_file.ota_trigger_zip.output_base64sha256
 

@@ -56,6 +56,19 @@ resource "aws_iot_policy_attachment" "claim" {
 #    Provisioning template binds this to each device's unique certificate.
 #    Using policy variables, each device can only access its OWN topics.
 # ---------------------------------------------------------------------------
+locals {
+  # An IoT policy document has a HARD 2048-byte limit, and every ARN below
+  # repeats this 38-character prefix. Spelling each statement out per topic (as
+  # this policy originally did) overflowed the limit as soon as the OPC UA
+  # shadow topics were added, so the document is deliberately written as one
+  # statement per ACTION with a resource list, rather than one per topic group.
+  iot_arn = "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}"
+
+  # Policy variable, resolved by AWS per connection. `$$` escapes the Terraform
+  # interpolation so the literal `${iot:...}` reaches the policy document.
+  thing = "$${iot:Connection.Thing.ThingName}"
+}
+
 resource "aws_iot_policy" "device" {
   name = "${var.project_name}-device-policy"
 
@@ -67,57 +80,42 @@ resource "aws_iot_policy" "device" {
         Effect = "Allow"
         Action = "iot:Connect"
         # ClientId must be the same as thing name (this is how firmware connects).
-        Resource = "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:client/$${iot:Connection.Thing.ThingName}"
+        Resource = "${local.iot_arn}:client/${local.thing}"
       },
+      # Publish, Subscribe and Receive stay separate: the device must be able to
+      # PUBLISH telemetry but never SUBSCRIBE to it, and the split is what keeps
+      # that enforceable. Every resource is still pinned to the device's own
+      # thing name, so one device can never reach another's topics.
       {
-        Sid    = "PublishTelemetry"
+        Sid    = "Publish"
         Effect = "Allow"
         Action = "iot:Publish"
         Resource = [
-          "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:topic/${var.telemetry_topic_prefix}/$${iot:Connection.Thing.ThingName}/*",
+          "${local.iot_arn}:topic/${var.telemetry_topic_prefix}/${local.thing}/*",
+          "${local.iot_arn}:topic/$aws/things/${local.thing}/jobs/*",
+          # The OPC UA config plane lives on the `opcua` NAMED shadow, so this
+          # has to cover `shadow/name/<name>/...`, not just the classic shadow.
+          "${local.iot_arn}:topic/$aws/things/${local.thing}/shadow/*",
         ]
       },
       {
-        Sid    = "SubscribeCommands"
-        Effect = "Allow"
-        Action = ["iot:Subscribe"]
-        Resource = [
-          "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:topicfilter/cmd/$${iot:Connection.Thing.ThingName}/*",
-        ]
-      },
-      {
-        Sid    = "ReceiveCommands"
-        Effect = "Allow"
-        Action = ["iot:Receive"]
-        Resource = [
-          "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:topic/cmd/$${iot:Connection.Thing.ThingName}/*",
-        ]
-      },
-      {
-        Sid    = "PublishJobRequests"
-        Effect = "Allow"
-        Action = "iot:Publish"
-        Resource = [
-          "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:topic/$aws/things/$${iot:Connection.Thing.ThingName}/jobs/$next/get",
-          "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:topic/$aws/things/$${iot:Connection.Thing.ThingName}/jobs/*/update",
-        ]
-      },
-      {
-        Sid    = "SubscribeJobResponses"
+        Sid    = "Subscribe"
         Effect = "Allow"
         Action = "iot:Subscribe"
         Resource = [
-          "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:topicfilter/$aws/things/$${iot:Connection.Thing.ThingName}/jobs/notify-next",
-          "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:topicfilter/$aws/things/$${iot:Connection.Thing.ThingName}/jobs/$next/get/accepted",
+          "${local.iot_arn}:topicfilter/cmd/${local.thing}/*",
+          "${local.iot_arn}:topicfilter/$aws/things/${local.thing}/jobs/*",
+          "${local.iot_arn}:topicfilter/$aws/things/${local.thing}/shadow/*",
         ]
       },
       {
-        Sid    = "ReceiveJobResponses"
+        Sid    = "Receive"
         Effect = "Allow"
         Action = "iot:Receive"
         Resource = [
-          "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:topic/$aws/things/$${iot:Connection.Thing.ThingName}/jobs/notify-next",
-          "arn:aws:iot:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:topic/$aws/things/$${iot:Connection.Thing.ThingName}/jobs/$next/get/accepted",
+          "${local.iot_arn}:topic/cmd/${local.thing}/*",
+          "${local.iot_arn}:topic/$aws/things/${local.thing}/jobs/*",
+          "${local.iot_arn}:topic/$aws/things/${local.thing}/shadow/*",
         ]
       },
     ]
@@ -218,9 +216,12 @@ resource "aws_iam_role_policy" "iot_rule" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect   = "Allow"
-      Action   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
-      Resource = "${aws_cloudwatch_log_group.telemetry.arn}:*"
+      Effect = "Allow"
+      Action = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
+      Resource = [
+        "${aws_cloudwatch_log_group.telemetry.arn}:*",
+        "${aws_cloudwatch_log_group.opcua_telemetry.arn}:*",
+      ]
     }]
   })
 }
@@ -233,6 +234,31 @@ resource "aws_iot_topic_rule" "telemetry_to_logs" {
 
   cloudwatch_logs {
     log_group_name = aws_cloudwatch_log_group.telemetry.name
+    role_arn       = aws_iam_role.iot_rule.arn
+  }
+}
+
+# ---------------------------------------------------------------------------
+# 5) OPC UA gateway telemetry.
+#    The OPC UA driver publishes BATCHES on `<prefix>/<thing>/opcua`, which the
+#    `<prefix>/+/data` rule above does not match. A separate log group keeps the
+#    batched OPC UA payloads out of the plain-telemetry stream, which is what
+#    makes the integration test in the firmware repo's `test-harness/`
+#    observable from the cloud side.
+# ---------------------------------------------------------------------------
+resource "aws_cloudwatch_log_group" "opcua_telemetry" {
+  name              = "/${var.project_name}/opcua-telemetry"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_iot_topic_rule" "opcua_telemetry_to_logs" {
+  name        = replace("${var.project_name}_opcua_telemetry_to_logs", "-", "_")
+  enabled     = true
+  sql         = "SELECT *, topic() AS topic, timestamp() AS ts FROM '${var.telemetry_topic_prefix}/+/opcua'"
+  sql_version = "2016-03-23"
+
+  cloudwatch_logs {
+    log_group_name = aws_cloudwatch_log_group.opcua_telemetry.name
     role_arn       = aws_iam_role.iot_rule.arn
   }
 }

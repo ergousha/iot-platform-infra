@@ -243,8 +243,8 @@ resource "aws_iot_topic_rule" "telemetry_to_logs" {
 #    The OPC UA driver publishes BATCHES on `<prefix>/<thing>/opcua`, which the
 #    `<prefix>/+/data` rule above does not match. A separate log group keeps the
 #    batched OPC UA payloads out of the plain-telemetry stream, which is what
-#    makes the integration test in the firmware repo's `test-harness/`
-#    observable from the cloud side.
+#    makes the firmware repo's on-device test (`gateway-hil`) observable from
+#    the cloud side.
 # ---------------------------------------------------------------------------
 resource "aws_cloudwatch_log_group" "opcua_telemetry" {
   name              = "/${var.project_name}/opcua-telemetry"

@@ -36,10 +36,13 @@ jobs:
       - name: Run Unit Tests
         run: go test -v -race ./...
 
+      # golangci-lint refuses a module whose `go` directive is newer than the
+      # Go it was built with; v1.64 was built with go1.24 and go.mod targets
+      # 1.26. v2 needs golangci-lint-action v7 or later.
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.64
+          version: v2.14.0
           args: --timeout=5m
 
   terraform:
@@ -63,10 +66,12 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
+      # Pinned: `latest` picked up v0.54's removal of the `module` attribute
+      # and broke every build. Bump deliberately.
       - name: Setup TFLint
         uses: terraform-linters/setup-tflint@v4
         with:
-          tflint_version: latest
+          tflint_version: v0.64.0
 
       - name: Show TFLint version
         run: tflint --version

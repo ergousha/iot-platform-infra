@@ -49,6 +49,22 @@ data "aws_iam_policy_document" "github_actions_policy" {
       "${aws_s3_bucket.firmware.arn}/*"
     ]
   }
+
+  # The firmware release build compiles the IoT endpoint, the provisioning
+  # template and the claim identity into the image; its build.rs reads them
+  # from these parameters. Without this, CI built an image with an empty
+  # endpoint and a placeholder claim identity. Read-only, and exactly these
+  # four. The SecureStrings use the AWS managed aws/ssm key, whose key policy
+  # already allows decryption through SSM for principals in this account.
+  statement {
+    actions = ["ssm:GetParameter"]
+    resources = [
+      aws_ssm_parameter.iot_endpoint.arn,
+      aws_ssm_parameter.provisioning_template.arn,
+      aws_ssm_parameter.claim_certificate.arn,
+      aws_ssm_parameter.claim_private_key.arn,
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "github_actions_s3" {
